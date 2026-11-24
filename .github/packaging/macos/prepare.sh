@@ -32,5 +32,19 @@ softwareupdate --install-rosetta --agree-to-license || true
 # shellcheck disable=SC1091
 source ci/src/brew_deps.sh
 export HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
-brew install --quiet "${BREW_DEPS[@]}" ccache
+deps=()
+for dep in "${BREW_DEPS[@]}"; do
+    [ "$dep" = nng ] || deps+=("$dep")
+done
+brew install --quiet "${deps[@]}" ccache
+
+# KiCad needs nng 1; Homebrew has 2. Static, so the app has nothing to carry.
+git init -q ~/kmb/nng-src
+cd ~/kmb/nng-src
+git fetch -q --depth 1 https://github.com/nanomsg/nng.git "$NNG_COMMIT"
+git checkout -q FETCH_HEAD
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/kmb/nng" \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 -DBUILD_SHARED_LIBS=OFF -DNNG_TESTS=OFF -DNNG_TOOLS=OFF
+cmake --build build --parallel
+cmake --install build
 df -h ~

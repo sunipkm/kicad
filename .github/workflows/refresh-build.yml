@@ -29,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.ref }}-${{ inputs.linux }}-${{ inputs.macos }}-${{ inputs.windows }}
   cancel-in-progress: false
 
 env:
@@ -40,6 +40,8 @@ env:
   # 2026-10-29.
   MAC_BUILDER_COMMIT: 0977c0f44b2f37243c1ecd38ba0c2ae08c8300c6
   WIN_BUILDER_COMMIT: ec74a8021d7981bd4dcd032f6693a3a3ba414f41
+  # nng 1.11.
+  NNG_COMMIT: 84aa701f42968bf536141a24e826da66963b571a
 
 jobs:
   linux:

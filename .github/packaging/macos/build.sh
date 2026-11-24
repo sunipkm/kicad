@@ -12,6 +12,7 @@ if [ "$target" = kicad ]; then
     export CCACHE_DIR=~/ccache CCACHE_MAXSIZE=2G CCACHE_COMPRESS=1
     export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
     export CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache
+    export CMAKE_PREFIX_PATH=$HOME/kmb/nng
     export CXXFLAGS="-Xclang -fno-pch-timestamp"
     mkdir -p "$CCACHE_DIR"
 fi
