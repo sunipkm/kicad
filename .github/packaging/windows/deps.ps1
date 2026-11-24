@@ -1,6 +1,8 @@
 # Build KiCad's vcpkg packages into the binary cache (C:\vcache), in the compiler environment the
 # builder uses, so that build.ps1 finds them there.
-$ErrorActionPreference = 'Stop'
+# The module's icon functions do not compile here and are not needed: the errors of loading it are
+# not ours to stop at (GitHub's shell does, through this global).
+$global:ErrorActionPreference = 'Continue'
 Set-Location C:\kwb
 Import-Module C:\kwb\KiBuild -Force -DisableNameChecking
 Set-Alias vswhere (Get-ChildItem C:\kwb\.support\vswhere*.exe | Select-Object -First 1).FullName -Scope Global

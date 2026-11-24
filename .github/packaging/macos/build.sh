@@ -16,6 +16,9 @@ if [ "$target" = kicad ]; then
     mkdir -p "$CCACHE_DIR"
 fi
 
+# KiCad's builder uses wxPython's own doxygen, older than wxWidgets wants.
+export WX_SKIP_DOXYGEN_VERSION_CHECK=1
+
 # The runner's Homebrew libraries are built for its own macOS, so the app needs that one too.
 cd ~/kmb/builder
 ./build.py --arch arm64 --macos-min-version 15.0 --build-dir ~/kmb/build --build-type Release \
