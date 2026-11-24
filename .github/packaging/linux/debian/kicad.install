@@ -1,0 +1,12 @@
+usr/bin
+usr/lib
+usr/share/applications/*.desktop
+usr/share/icons
+usr/share/kicad/internat
+usr/share/kicad/plugins
+usr/share/kicad/scripting
+usr/share/kicad/template
+usr/share/kicad/resources
+usr/share/metainfo
+usr/share/mime
+usr/share/kicad/schemas

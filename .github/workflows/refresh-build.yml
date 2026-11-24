@@ -1,0 +1,286 @@
+# KiCad with the RefreshLibraries API command, for Ubuntu x64, macOS arm64 and Windows x64.
+#
+# Run it by hand (Actions > Build > Run workflow), or push a tag such as 10.0.8-refresh1: a tag
+# also makes a GitHub release with the three packages.
+#
+# A job on a hosted runner may take 6 hours at most. The dependencies of macOS and Windows are
+# built by jobs of their own and cached; Windows' carry on where they stopped when run again.
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      linux:
+        description: Ubuntu x64 (also builds locally)
+        type: boolean
+        default: false
+      macos:
+        description: macOS arm64
+        type: boolean
+        default: true
+      windows:
+        description: Windows x64
+        type: boolean
+        default: true
+  push:
+    tags: ['*-refresh*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  KICAD_VERSION: 10.0.8
+  # The patch's own number, after KiCad's version: 10.0.8-refresh1.
+  REFRESH: refresh1
+  # KiCad's builders: kicad-mac-builder's 10.0 branch, kicad-win-builder's master, 2026-11-19 and
+  # 2026-10-29.
+  MAC_BUILDER_COMMIT: 0977c0f44b2f37243c1ecd38ba0c2ae08c8300c6
+  WIN_BUILDER_COMMIT: ec74a8021d7981bd4dcd032f6693a3a3ba414f41
+
+jobs:
+  linux:
+    name: Ubuntu x64
+    if: github.event_name == 'push' || inputs.linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ccache
+          key: ccache-linux-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-linux-
+
+      - name: Build and test the package
+        timeout-minutes: 330
+        run: |
+          mkdir -p out ccache
+          docker run --rm \
+            -v "$PWD:/src:ro" -v "$PWD/out:/out" -v "$PWD/ccache:/ccache" \
+            -e VERSION="${KICAD_VERSION}+${REFRESH}" \
+            ubuntu:26.04 bash /src/.github/packaging/linux/build-deb.sh
+
+      - name: Save the compiler cache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ccache
+          key: ccache-linux-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: kicad-ubuntu-26.04-x64
+          path: out/*.deb
+          if-no-files-found: error
+
+  macos-deps:
+    name: macOS dependencies
+    if: github.event_name == 'push' || inputs.macos
+    runs-on: macos-15
+    timeout-minutes: 355
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      - name: Find the cache key
+        id: key
+        run: |
+          xcode=$(xcodebuild -version | tr -dc '0-9.')
+          echo "key=macos-deps-${MAC_BUILDER_COMMIT}-${xcode}-1" >> "$GITHUB_OUTPUT"
+
+      - name: Look for built dependencies
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/kmb/build
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          persist-credentials: false
+
+      - name: Prepare kicad-mac-builder
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: .github/packaging/macos/prepare.sh
+
+      - name: Build wxWidgets, Python, wxPython and ngspice
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: .github/packaging/macos/build.sh kicad-build-deps
+
+      - name: Save the dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/kmb/build
+          key: ${{ steps.key.outputs.key }}
+
+  macos:
+    name: macOS arm64
+    needs: macos-deps
+    runs-on: macos-15
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore the dependencies
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/kmb/build
+          key: ${{ needs.macos-deps.outputs.key }}
+          fail-on-cache-miss: true
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/ccache
+          key: ccache-macos-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ccache-macos-
+
+      - name: Prepare kicad-mac-builder
+        run: .github/packaging/macos/prepare.sh
+
+      - name: Build KiCad
+        timeout-minutes: 320
+        run: .github/packaging/macos/build.sh kicad
+
+      - name: Save the compiler cache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/ccache
+          key: ccache-macos-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Check the app and make the DMG
+        run: .github/packaging/macos/package.sh
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: kicad-macos-arm64
+          path: out/*.dmg
+          if-no-files-found: error
+
+  windows-deps:
+    name: Windows dependencies
+    if: github.event_name == 'push' || inputs.windows
+    runs-on: windows-2022
+    timeout-minutes: 355
+    env:
+      VCPKG_BINARY_SOURCES: clear;files,C:\vcache,readwrite
+      VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}\.github\packaging\windows\triplets
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore the vcpkg packages
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: C:\vcache
+          key: vcpkg-${{ hashFiles('vcpkg*.json', '.github/packaging/windows/triplets/*') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: vcpkg-${{ hashFiles('vcpkg*.json', '.github/packaging/windows/triplets/*') }}-
+
+      - name: Prepare kicad-win-builder
+        shell: pwsh
+        run: .github/packaging/windows/prepare.ps1
+
+      # Packages done so far are kept when this stops early: run the failed jobs again to go on.
+      - name: Build the vcpkg packages
+        timeout-minutes: 320
+        shell: pwsh
+        run: .github/packaging/windows/deps.ps1
+
+      - name: Show what failed
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-ChildItem C:\kwb\vcpkg\buildtrees -Filter *-err.log -Recurse -Depth 1 |
+            Sort-Object LastWriteTime | Select-Object -Last 3 |
+            ForEach-Object { "==== $($_.FullName)"; Get-Content $_.FullName -Tail 60 }
+          Get-PSDrive -PSProvider FileSystem
+
+      - name: Save the vcpkg packages
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: C:\vcache
+          key: vcpkg-${{ hashFiles('vcpkg*.json', '.github/packaging/windows/triplets/*') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  windows:
+    name: Windows x64
+    needs: windows-deps
+    runs-on: windows-2022
+    timeout-minutes: 355
+    env:
+      VCPKG_BINARY_SOURCES: clear;files,C:\vcache,readwrite
+      VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}\.github\packaging\windows\triplets
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore the vcpkg packages
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: C:\vcache
+          key: vcpkg-${{ hashFiles('vcpkg*.json', '.github/packaging/windows/triplets/*') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: vcpkg-${{ hashFiles('vcpkg*.json', '.github/packaging/windows/triplets/*') }}-
+
+      - name: Prepare kicad-win-builder
+        shell: pwsh
+        run: .github/packaging/windows/prepare.ps1
+
+      - name: Build KiCad
+        shell: pwsh
+        run: .github/packaging/windows/build.ps1
+
+      - name: Make the installer
+        shell: pwsh
+        run: .github/packaging/windows/package.ps1
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: kicad-windows-x64
+          path: out/*.exe
+          if-no-files-found: error
+
+  release:
+    name: Release
+    if: github.event_name == 'push'
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: packages
+          merge-multiple: true
+
+      - name: Make the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd packages
+          sha256sum -- * > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "KiCad $GITHUB_REF_NAME" \
+            --notes "KiCad ${KICAD_VERSION} with the RefreshLibraries API command. Not an official KiCad build." -- *

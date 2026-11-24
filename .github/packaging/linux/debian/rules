@@ -1,0 +1,32 @@
+#!/usr/bin/make -f
+# From the KiCad PPA's package (kicad 10.0.8~ubuntu26.04.1), without debug symbols and link-time
+# optimization, which a hosted CI runner has neither the disk nor the memory for.
+export DH_VERBOSE = 1
+export DEB_BUILD_MAINT_OPTIONS = optimize=-lto
+export DEB_CFLAGS_MAINT_STRIP = -g
+export DEB_CXXFLAGS_MAINT_STRIP = -g
+
+%:
+	dh $@ --sourcedirectory=kicad --parallel
+
+# What follows the '+' of the package's version (10.0.8+refresh1) is shown in KiCad's own version.
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-DDEFAULT_INSTALL_PATH=/usr -DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DKICAD_USE_CMAKE_FINDPROTOBUF=ON \
+		-DKICAD_BUILD_QA_TESTS=OFF \
+		-DwxWidgets_CONFIG_OPTIONS=$(shell bash $(CURDIR)/debian/usegtk3.sh) \
+		-DKICAD_VERSION_EXTRA=$(shell dpkg-parsechangelog -SVersion | cut -f2 -d'+') \
+		-DKICAD_BUILD_I18N=ON
+
+# kicad.install picks from debian/tmp (the demos are left out).
+override_dh_auto_install:
+	dh_auto_install --destdir=debian/tmp
+
+override_dh_auto_test:
+
+override_dh_compress:
+	dh_compress -X.py
+
+override_dh_dwz:

@@ -1,0 +1,10 @@
+{
+    "name": "KiCad 10.0.8 with RefreshLibraries (build)",
+    "output_prefix": "kicad-",
+    "package_version": "@VERSION@",
+    "train": "stable",
+    "build_mode": "Release",
+    "nsis": { "file": "install-8-9-10.nsi" },
+    "sources": { "kicad": {}, "symbols": {}, "footprints": {}, "3dmodels": {}, "templates": {} },
+    "vcpkg": { "manifest_mode": true }
+}
