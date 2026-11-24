@@ -85,3 +85,47 @@ message SetTextVariables
   // Whether to merge or replace the existing text variables map with the contents of this message
   kiapi.common.types.MapMergeMode merge_mode = 3;
 }
+
+
+// The kinds of library a RefreshLibraries requests.
+enum LibraryType
+{
+  LT_UNKNOWN   = 0;
+  LT_SYMBOL    = 1;
+  LT_FOOTPRINT = 2;
+}
+
+// Tells KiCad that libraries changed on disk outside KiCad (for example, a parts importer wrote
+// a symbol into a .kicad_sym file, a footprint into a .pretty folder, or a row into a library
+// table), so that the open editors, choosers and library trees show the change without
+// restarting KiCad.
+//
+// The library tables named as changed are read again, each library in `nicknames` is read again
+// from disk, then libraries not yet loaded are loaded and the open windows are told to refresh.
+// Returns RefreshLibrariesResponse.
+message RefreshLibraries
+{
+  // The library types to refresh. Empty means symbols and footprints.
+  repeated LibraryType types = 1;
+
+  // The nicknames of libraries whose files changed. A nickname is looked up in each requested
+  // type's tables.
+  repeated string nicknames = 2;
+
+  // Whether the project's sym-lib-table / fp-lib-table changed (rows added or removed).
+  bool project_table_changed = 3;
+
+  // Whether the global sym-lib-table / fp-lib-table changed. Reading the global tables again
+  // reloads every global library, which can take a while.
+  bool global_table_changed = 4;
+}
+
+
+message RefreshLibrariesResponse
+{
+  // The nicknames found in a requested type's tables and read again.
+  repeated string reloaded = 1;
+
+  // The nicknames found in none of the requested types' tables.
+  repeated string not_found = 2;
+}

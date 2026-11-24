@@ -545,7 +545,7 @@ PCB_EDIT_FRAME::PCB_EDIT_FRAME( KIWAY* aKiway, wxWindow* aParent ) :
 
     if( Kiface().IsSingle() )
     {
-        m_apiHandlerCommon = std::make_unique<API_HANDLER_COMMON>();
+        m_apiHandlerCommon = std::make_unique<API_HANDLER_COMMON>( &Kiway() );
         Pgm().GetApiServer().RegisterHandler( m_apiHandlerCommon.get() );
     }
 #endif
@@ -1506,6 +1506,10 @@ void PCB_EDIT_FRAME::doCloseWindow()
 
 #ifdef KICAD_IPC_API
     Pgm().GetApiServer().DeregisterHandler( m_apiHandler.get() );
+
+    if( m_apiHandlerCommon )
+        Pgm().GetApiServer().DeregisterHandler( m_apiHandlerCommon.get() );
+
     wxTheApp->Unbind( EDA_EVT_PLUGIN_AVAILABILITY_CHANGED,
                       &PCB_EDIT_FRAME::onPluginAvailabilityChanged, this );
 #endif

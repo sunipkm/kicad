@@ -30,10 +30,16 @@
 using namespace kiapi::common;
 using google::protobuf::Empty;
 
+class KIWAY;
+
 class API_HANDLER_COMMON : public API_HANDLER
 {
 public:
-    API_HANDLER_COMMON();
+    /**
+     * @param aKiway is the kiway whose frames are told when libraries are refreshed, or nullptr
+     *               when there is none.
+     */
+    API_HANDLER_COMMON( KIWAY* aKiway = nullptr );
 
     ~API_HANDLER_COMMON() override {}
 
@@ -69,6 +75,11 @@ private:
 
     HANDLER_RESULT<Empty> handleSetTextVariables(
         const HANDLER_CONTEXT<commands::SetTextVariables>& aCtx );
+
+    HANDLER_RESULT<commands::RefreshLibrariesResponse> handleRefreshLibraries(
+        const HANDLER_CONTEXT<commands::RefreshLibraries>& aCtx );
+
+    KIWAY* m_kiway;
 };
 
 #endif //KICAD_API_HANDLER_COMMON_H

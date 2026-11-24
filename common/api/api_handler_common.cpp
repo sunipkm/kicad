@@ -18,7 +18,9 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <algorithm>
 #include <ranges>
+#include <set>
 #include <tuple>
 
 #include <api/api_handler_common.h>
@@ -26,6 +28,10 @@
 #include <eda_shape.h>
 #include <eda_text.h>
 #include <gestfich.h>
+#include <kiway.h>
+#include <kiway_mail.h>
+#include <libraries/library_manager.h>
+#include <mail_type.h>
 #include <geometry/shape_compound.h>
 #include <google/protobuf/empty.pb.h>
 #include <paths.h>
@@ -42,8 +48,9 @@ using namespace kiapi::common::types;
 using google::protobuf::Empty;
 
 
-API_HANDLER_COMMON::API_HANDLER_COMMON() :
-        API_HANDLER()
+API_HANDLER_COMMON::API_HANDLER_COMMON( KIWAY* aKiway ) :
+        API_HANDLER(),
+        m_kiway( aKiway )
 {
     registerHandler<commands::GetVersion, GetVersionResponse>( &API_HANDLER_COMMON::handleGetVersion );
     registerHandler<GetKiCadBinaryPath, PathResponse>(
@@ -62,6 +69,8 @@ API_HANDLER_COMMON::API_HANDLER_COMMON() :
             &API_HANDLER_COMMON::handleGetTextVariables );
     registerHandler<SetTextVariables, Empty>(
             &API_HANDLER_COMMON::handleSetTextVariables );
+    registerHandler<RefreshLibraries, RefreshLibrariesResponse>(
+            &API_HANDLER_COMMON::handleRefreshLibraries );
 
 }
 
@@ -411,4 +420,117 @@ HANDLER_RESULT<Empty> API_HANDLER_COMMON::handleSetTextVariables(
     Pgm().GetSettingsManager().SaveProject();
 
     return Empty();
+}
+
+
+HANDLER_RESULT<RefreshLibrariesResponse> API_HANDLER_COMMON::handleRefreshLibraries(
+        const HANDLER_CONTEXT<RefreshLibraries>& aCtx )
+{
+    std::vector<LIBRARY_TABLE_TYPE> types;
+
+    for( int type : aCtx.Request.types() )
+    {
+        switch( type )
+        {
+        case LibraryType::LT_SYMBOL:    types.push_back( LIBRARY_TABLE_TYPE::SYMBOL );    break;
+        case LibraryType::LT_FOOTPRINT: types.push_back( LIBRARY_TABLE_TYPE::FOOTPRINT ); break;
+
+        default:
+        {
+            ApiResponseStatus e;
+            e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+            e.set_error_message( fmt::format( "unknown library type {}", type ) );
+            return tl::unexpected( e );
+        }
+        }
+    }
+
+    if( types.empty() )
+        types = { LIBRARY_TABLE_TYPE::SYMBOL, LIBRARY_TABLE_TYPE::FOOTPRINT };
+
+    auto wants =
+            [&]( LIBRARY_TABLE_TYPE aType )
+            {
+                return std::find( types.begin(), types.end(), aType ) != types.end();
+            };
+
+    LIBRARY_MANAGER&         manager = Pgm().GetLibraryManager();
+    RefreshLibrariesResponse reply;
+    std::set<std::string>    found;
+    std::string              changedSymbolLibs;
+
+    for( LIBRARY_TABLE_TYPE type : types )
+    {
+        // As DIALOG_EDIT_LIBRARY_TABLES' callers and MAIL_ADD_LOCAL_LIB do.
+        if( aCtx.Request.global_table_changed() )
+            manager.LoadGlobalTables( { type } );
+
+        if( aCtx.Request.project_table_changed() )
+            manager.ReloadTables( LIBRARY_TABLE_SCOPE::PROJECT, { type } );
+
+        for( const std::string& nick : aCtx.Request.nicknames() )
+        {
+            wxString nickname = wxString::FromUTF8( nick );
+
+            if( !manager.GetRow( type, nickname ) )
+                continue;
+
+            // Drops the cached library, then reads it from disk again before the frames are
+            // told: a library tree synced while it is still loading records the file's new
+            // timestamp with the old contents, and skips it on the next sync.
+            manager.ReloadLibraryEntry( type, nickname, LIBRARY_TABLE_SCOPE::BOTH );
+            manager.LoadLibraryEntry( type, nickname );
+            found.insert( nick );
+
+            if( type == LIBRARY_TABLE_TYPE::SYMBOL )
+                changedSymbolLibs += nick + "\n";
+        }
+    }
+
+    for( const std::string& nick : aCtx.Request.nicknames() )
+    {
+        if( found.count( nick ) )
+            reply.add_reloaded( nick );
+        else
+            reply.add_not_found( nick );
+    }
+
+    if( m_kiway )
+    {
+        std::string payload;
+        bool        tablesChanged = aCtx.Request.project_table_changed()
+                                    || aCtx.Request.global_table_changed();
+
+        if( wants( LIBRARY_TABLE_TYPE::SYMBOL ) )
+        {
+            // Loads libraries added to a table (the named ones are loaded above); tells the
+            // schematic frames again when done.
+            if( tablesChanged )
+            {
+                if( KIFACE* face = m_kiway->KiFACE( KIWAY::FACE_SCH, false ) )
+                    face->PreloadLibraries( m_kiway );
+            }
+
+            m_kiway->ExpressMail( FRAME_SCH, MAIL_RELOAD_LIB, payload );
+            m_kiway->ExpressMail( FRAME_SCH_SYMBOL_EDITOR, MAIL_LIBS_CHANGED_ON_DISK,
+                                  changedSymbolLibs );
+            m_kiway->ExpressMail( FRAME_SCH_VIEWER, MAIL_RELOAD_LIB, payload );
+        }
+
+        if( wants( LIBRARY_TABLE_TYPE::FOOTPRINT ) )
+        {
+            if( tablesChanged )
+            {
+                if( KIFACE* face = m_kiway->KiFACE( KIWAY::FACE_PCB, false ) )
+                    face->PreloadLibraries( m_kiway );
+            }
+
+            m_kiway->ExpressMail( FRAME_PCB_EDITOR, MAIL_RELOAD_LIB, payload );
+            m_kiway->ExpressMail( FRAME_FOOTPRINT_EDITOR, MAIL_RELOAD_LIB, payload );
+            m_kiway->ExpressMail( FRAME_FOOTPRINT_VIEWER, MAIL_RELOAD_LIB, payload );
+            m_kiway->ExpressMail( FRAME_CVPCB, MAIL_RELOAD_LIB, payload );
+        }
+    }
+
+    return reply;
 }

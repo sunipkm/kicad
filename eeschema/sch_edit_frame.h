@@ -66,6 +66,7 @@ class DIALOG_SYMBOL_FIELDS_TABLE;
 class RESCUER;
 class HIERARCHY_PANE;
 class API_HANDLER_SCH;
+class API_HANDLER_COMMON;
 class DIALOG_SCHEMATIC_SETUP;
 class PROGRESS_REPORTER;
 class wxSearchCtrl;
@@ -1104,7 +1105,8 @@ private:
     wxChoice*                   m_currentVariantCtrl;
 
 #ifdef KICAD_IPC_API
-    std::unique_ptr<API_HANDLER_SCH> m_apiHandler;
+    std::unique_ptr<API_HANDLER_SCH>    m_apiHandler;
+    std::unique_ptr<API_HANDLER_COMMON> m_apiHandlerCommon;
 #endif
 };
 

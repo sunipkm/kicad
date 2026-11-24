@@ -23,6 +23,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
  */
 
+#include <sstream>
 #include <bitmaps.h>
 #include <wx/hyperlink.h>
 #include <base_screen.h>
@@ -1802,6 +1803,34 @@ void SYMBOL_EDIT_FRAME::KiwayMailIn( KIWAY_MAIL_EVENT& mail )
 
         break;
 
+    case MAIL_LIBS_CHANGED_ON_DISK:
+    {
+        std::stringstream ss( payload );
+        std::string       line;
+
+        while( std::getline( ss, line, '\n' ) )
+        {
+            wxString lib = wxString::FromUTF8( line );
+
+            // The editor's copy of a library it has opened (LIB_BUFFER) would hide the file's
+            // new contents; drop the copies that hold no unsaved edits.
+            if( lib.IsEmpty() || m_libMgr->IsLibraryModified( lib ) )
+                continue;
+
+            if( lib == GetCurLib() && GetScreen() && GetScreen()->IsContentModified() )
+                continue;
+
+            m_libMgr->RevertLibrary( lib );
+
+            // Rebuilt whatever the library's hash says: it can be the same after the file
+            // changed, and the tree would then keep the old symbols.
+            SyncLibraries( false, false, lib );
+        }
+
+        // Then as MAIL_RELOAD_LIB, for libraries added to or removed from the tables.
+        KI_FALLTHROUGH;
+    }
+
     case MAIL_RELOAD_LIB:
     {
         wxString          currentLib = GetCurLib();
@@ -1818,6 +1847,12 @@ void SYMBOL_EDIT_FRAME::KiwayMailIn( KIWAY_MAIL_EVENT& mail )
 
         SyncLibraries( true );
         ThawLibraryTree();
+
+        // A filter in the search box, run again as typing it does: the kept state of the
+        // sync hides new symbols of a filtered library until the filter is typed again.
+        if( !GetLibTree()->GetSearchString().IsEmpty() )
+            GetLibTree()->Regenerate( false );
+
         RefreshLibraryTree();
 
         break;

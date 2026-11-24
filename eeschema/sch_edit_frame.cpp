@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <api/api_handler_sch.h>
+#include <api/api_handler_common.h>
 #include <api/api_server.h>
 #include <base_units.h>
 #include <bitmaps.h>
@@ -463,6 +464,13 @@ SCH_EDIT_FRAME::SCH_EDIT_FRAME( KIWAY* aKiway, wxWindow* aParent ) :
 #ifdef KICAD_IPC_API
     m_apiHandler = std::make_unique<API_HANDLER_SCH>( this );
     Pgm().GetApiServer().RegisterHandler( m_apiHandler.get() );
+
+    // Run without the project manager, the common commands (RefreshLibraries, ...) are ours.
+    if( Kiface().IsSingle() )
+    {
+        m_apiHandlerCommon = std::make_unique<API_HANDLER_COMMON>( &Kiway() );
+        Pgm().GetApiServer().RegisterHandler( m_apiHandlerCommon.get() );
+    }
 #endif
 
     // Default shutdown reason until a file is loaded
@@ -1226,6 +1234,10 @@ void SCH_EDIT_FRAME::doCloseWindow()
 {
 #ifdef KICAD_IPC_API
     Pgm().GetApiServer().DeregisterHandler( m_apiHandler.get() );
+
+    if( m_apiHandlerCommon )
+        Pgm().GetApiServer().DeregisterHandler( m_apiHandlerCommon.get() );
+
     wxTheApp->Unbind( EDA_EVT_PLUGIN_AVAILABILITY_CHANGED, &SCH_EDIT_FRAME::onPluginAvailabilityChanged, this );
 #endif
 
